@@ -10,7 +10,6 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Command, Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiohttp import web
 
 API_TOKEN = '6775113338:AAEelfoW-YxQhfEGjLw1_XCt7lIbVOsSW6g'
@@ -19,9 +18,6 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
-
-with open('admin_id.json', 'r') as f:
-    admin_id = json.load(f)["admin_id"]
 
 # Загрузка активных ключей
 def load_keys():
@@ -210,7 +206,7 @@ async def keep_alive():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://google.com/') as response:
+                async with session.get('https://example.com/keep-alive') as response:
                     if response.status == 200:
                         logging.info("Keep-alive request successful.")
                     else:
