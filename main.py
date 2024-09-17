@@ -10,6 +10,8 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Command, Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiohttp import web  # Добавим веб-сервер для заглушки
+import os
 
 API_TOKEN = '6775113338:AAEelfoW-YxQhfEGjLw1_XCt7lIbVOsSW6g'
 
@@ -206,6 +208,17 @@ async def get_activation_key(message: types.Message):
 
 async def main():
     logging.info("Starting bot...")
+
+    # Запуск простого веб-сервера для поддержки платформы
+    app = web.Application()
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+
     try:
         await dp.start_polling()
     except (KeyboardInterrupt, SystemExit):
