@@ -222,7 +222,7 @@ async def keep_alive():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                await session.get('https://your-keep-alive-endpoint.com')
+                await session.get('https://google.com')
         except Exception as e:
             logging.error(f"Keep-alive request error: {e}")
         await asyncio.sleep(300)
