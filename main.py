@@ -4,12 +4,14 @@ import asyncio
 import json
 import random
 import string
+import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Command, Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiohttp import web
 
 API_TOKEN = '6775113338:AAEelfoW-YxQhfEGjLw1_XCt7lIbVOsSW6g'
 
@@ -203,15 +205,12 @@ async def get_activation_key(message: types.Message):
                 await message.reply("Вы активированы и можете использовать бота.", reply_markup=markup_user)
             else:
                 await message.reply("Неверный ключ. Пожалуйста, введите правильный ключ активации.")
-        else:
-            await message.reply("Введите активационный ключ.")
 
-# Функция для отправки keep-alive запроса
 async def keep_alive():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://your-keep-alive-endpoint.com') as response:
+                async with session.get('https://google.com/') as response:
                     if response.status == 200:
                         logging.info("Keep-alive request successful.")
                     else:
@@ -222,13 +221,26 @@ async def keep_alive():
 
 async def main():
     logging.info("Starting bot...")
-    keep_alive_task = asyncio.create_task(keep_alive())  # Запускаем keep-alive задачу
+
+    # Запуск простого веб-сервера для поддержки платформы
+    app = web.Application()
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+
+    # Запуск keep-alive задачи
+    keep_alive_task = asyncio.create_task(keep_alive())
+
     try:
         await dp.start_polling()
     except (KeyboardInterrupt, SystemExit):
         logging.info("Bot stopped.")
     finally:
-        keep_alive_task.cancel()  # Отменяем задачу при завершении
+        keep_alive_task.cancel()  # Отменяем keep-alive задачу при завершении
 
 if __name__ == '__main__':
     asyncio.run(main())
