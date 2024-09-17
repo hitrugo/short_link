@@ -4,14 +4,14 @@ import asyncio
 import json
 import random
 import string
-import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Command, Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiohttp import web
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton  # Импорт для клавиатуры
+import os
 
 API_TOKEN = '6775113338:AAEelfoW-YxQhfEGjLw1_XCt7lIbVOsSW6g'
 
@@ -19,6 +19,21 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
+
+# Загрузка admin_id из файла
+try:
+    with open('admin_id.json', 'r') as f:
+        admin_id = json.load(f).get("admin_id")
+        logging.info(f"Admin ID loaded: {admin_id}")
+except FileNotFoundError:
+    logging.error("Файл 'admin_id.json' не найден.")
+    admin_id = None
+except json.JSONDecodeError:
+    logging.error("Ошибка в формате 'admin_id.json'.")
+    admin_id = None
+
+if admin_id is None:
+    raise ValueError("Admin ID is missing. Проверьте файл 'admin_id.json'.")
 
 # Загрузка активных ключей
 def load_keys():
@@ -54,6 +69,7 @@ def get_random_token():
         return random.choice(api_tokens)  # Случайный выбор токена
     return None
 
+# Кнопки
 button_create_link = KeyboardButton(text='Create Link')
 button_create_key = KeyboardButton(text='Create Key')
 button_reset = KeyboardButton(text='Reset')
@@ -139,10 +155,9 @@ async def process_url(message: types.Message, state: FSMContext):
     await message.reply("Введите количество запросов:")
     await state.set_state(URLState.number.state)
 
-# Функция для выполнения запросов с семафором для ограничения потоков
 async def perform_request(session, url, semaphore):
-    async with semaphore:  # Ограничиваем количество одновременно выполняемых задач
-        api_token = get_random_token()  # Каждый запрос получает новый токен
+    async with semaphore:
+        api_token = get_random_token()
         if not api_token:
             return None
 
@@ -174,8 +189,7 @@ async def process_number(message: types.Message, state: FSMContext):
         return
 
     links = []
-
-    max_concurrent_tasks = 10  # Здесь можно указать количество потоков
+    max_concurrent_tasks = 10
     semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
     async with aiohttp.ClientSession() as session:
@@ -203,41 +217,36 @@ async def get_activation_key(message: types.Message):
             else:
                 await message.reply("Неверный ключ. Пожалуйста, введите правильный ключ активации.")
 
+# Keep-alive функция
 async def keep_alive():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get('https://example.com/keep-alive') as response:
-                    if response.status == 200:
-                        logging.info("Keep-alive request successful.")
-                    else:
-                        logging.warning(f"Keep-alive request failed with status: {response.status}")
+                await session.get('https://your-keep-alive-endpoint.com')
         except Exception as e:
             logging.error(f"Keep-alive request error: {e}")
-        await asyncio.sleep(600)  # Отправляем запрос каждые 10 минут
+        await asyncio.sleep(300)
 
 async def main():
     logging.info("Starting bot...")
+    
+    keep_alive_task = asyncio.create_task(keep_alive())  # Запускаем keep-alive задачу
 
     # Запуск простого веб-сервера для поддержки платформы
     app = web.Application()
     app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
-
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-    # Запуск keep-alive задачи
-    keep_alive_task = asyncio.create_task(keep_alive())
-
     try:
         await dp.start_polling()
     except (KeyboardInterrupt, SystemExit):
         logging.info("Bot stopped.")
     finally:
-        keep_alive_task.cancel()  # Отменяем keep-alive задачу при завершении
+        keep_alive_task.cancel()  # Отменяем задачу при завершении
 
 if __name__ == '__main__':
     asyncio.run(main())
