@@ -10,8 +10,6 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Command, Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiohttp import web  # Добавим веб-сервер для заглушки
-import os
 
 API_TOKEN = '6775113338:AAEelfoW-YxQhfEGjLw1_XCt7lIbVOsSW6g'
 
@@ -205,24 +203,32 @@ async def get_activation_key(message: types.Message):
                 await message.reply("Вы активированы и можете использовать бота.", reply_markup=markup_user)
             else:
                 await message.reply("Неверный ключ. Пожалуйста, введите правильный ключ активации.")
+        else:
+            await message.reply("Введите активационный ключ.")
+
+# Функция для отправки keep-alive запроса
+async def keep_alive():
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get('https://your-keep-alive-endpoint.com') as response:
+                    if response.status == 200:
+                        logging.info("Keep-alive request successful.")
+                    else:
+                        logging.warning(f"Keep-alive request failed with status: {response.status}")
+        except Exception as e:
+            logging.error(f"Keep-alive request error: {e}")
+        await asyncio.sleep(600)  # Отправляем запрос каждые 10 минут
 
 async def main():
     logging.info("Starting bot...")
-
-    # Запуск простого веб-сервера для поддержки платформы
-    app = web.Application()
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.getenv("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-
+    keep_alive_task = asyncio.create_task(keep_alive())  # Запускаем keep-alive задачу
     try:
         await dp.start_polling()
     except (KeyboardInterrupt, SystemExit):
         logging.info("Bot stopped.")
+    finally:
+        keep_alive_task.cancel()  # Отменяем задачу при завершении
 
 if __name__ == '__main__':
     asyncio.run(main())
