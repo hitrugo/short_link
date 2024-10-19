@@ -10,8 +10,7 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Command, Text
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiohttp import web  # Добавим веб-сервер для заглушки
-import os
+import aiofiles
 
 API_TOKEN = '6775113338:AAEelfoW-YxQhfEGjLw1_XCt7lIbVOsSW6g'
 
@@ -20,33 +19,36 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
 
+# Загрузка admin_id из файла
 with open('admin_id.json', 'r') as f:
     admin_id = json.load(f)["admin_id"]
 
-# Загрузка активных ключей
-def load_keys():
+# Асинхронная загрузка активных ключей
+async def load_keys_async():
     try:
-        with open('active_keys.json', 'r') as f:
-            return json.load(f)
+        async with aiofiles.open('active_keys.json', 'r') as f:
+            return json.loads(await f.read())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-def save_keys():
-    with open('active_keys.json', 'w') as f:
-        json.dump(active_keys, f, indent=4)
+# Асинхронное сохранение активных ключей
+async def save_keys_async():
+    async with aiofiles.open('active_keys.json', 'w') as f:
+        await f.write(json.dumps(active_keys, indent=4))
 
-active_keys = load_keys()
+active_keys = asyncio.run(load_keys_async())
 
 # Загрузка API токенов
 def load_api_tokens():
     try:
         with open('api_tokens.json', 'r') as f:
-            data = f.read().strip()  # Убираем возможные пробелы
-            if not data:
-                return []  # Если файл пуст, возвращаем пустой список
-            return json.loads(data)
+            data = f.read().strip()
+            if data:
+                return json.loads(data)
+            else:
+                return []  # Если файл пуст, вернуть пустой список
     except (FileNotFoundError, json.JSONDecodeError):
-        logging.error("Файл с API токенами пуст или имеет неверный формат.")
+        logging.error("Ошибка при загрузке токенов.")
         return []
 
 api_tokens = load_api_tokens()
@@ -57,6 +59,7 @@ def get_random_token():
         return random.choice(api_tokens)  # Случайный выбор токена
     return None
 
+# Кнопки для пользователей и администратора
 button_create_link = KeyboardButton(text='Create Link')
 button_create_key = KeyboardButton(text='Create Key')
 button_reset = KeyboardButton(text='Reset')
@@ -77,10 +80,12 @@ markup_admin = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Состояния FSM для процесса создания ссылки
 class URLState(StatesGroup):
     url = State()
     number = State()
 
+# Проверка валидности ключа
 def is_key_valid(user_id):
     key_info = active_keys.get(user_id)
     if key_info:
@@ -89,6 +94,16 @@ def is_key_valid(user_id):
             return True
     return False
 
+# Фильтр для администратора
+from aiogram.dispatcher.filters import BoundFilter
+
+class AdminFilter(BoundFilter):
+    async def check(self, message: types.Message):
+        return message.from_user.id == admin_id
+
+dp.filters_factory.bind(AdminFilter)
+
+# Обработчик команды /start
 @dp.message_handler(Command("start"))
 async def send_welcome(message: types.Message):
     if message.from_user.id == admin_id:
@@ -105,14 +120,19 @@ async def send_welcome(message: types.Message):
         else:
             await message.reply("Для доступа к боту, пожалуйста, введите активационный ключ.")
 
-@dp.message_handler(Text(equals="Create Key"), user_id=admin_id)
+# Обработчик создания ключа для администратора
+@dp.message_handler(Text(equals="Create Key"), AdminFilter())
 async def handle_create_key(message: types.Message):
+    if admin_id in active_keys and active_keys[admin_id][1] > asyncio.get_event_loop().time():
+        await message.reply("У вас уже есть активный ключ.")
+        return
     key = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
     expiry = asyncio.get_event_loop().time() + 86400
     active_keys[admin_id] = (key, expiry)
-    save_keys()
+    await save_keys_async()
     await message.reply(f"Ключ для активации: {key}\nЭтот ключ активен 24 часа.")
 
+# Обработчик создания ссылки
 @dp.message_handler(Text(equals="Create Link"))
 async def handle_create_link(message: types.Message, state: FSMContext):
     if message.from_user.id != admin_id and not is_key_valid(message.from_user.id):
@@ -123,11 +143,13 @@ async def handle_create_link(message: types.Message, state: FSMContext):
     await message.reply("Введите URL (например, google.com):")
     await state.set_state(URLState.url.state)
 
+# Обработчик кнопки сброса состояния
 @dp.message_handler(Text(equals="Reset"))
 async def handle_reset(message: types.Message, state: FSMContext):
     await state.finish()
     await message.reply("Вы вернулись на начальный экран.", reply_markup=markup_user)
 
+# Обработчик шага ввода URL
 @dp.message_handler(state=URLState.url)
 async def process_url(message: types.Message, state: FSMContext):
     if message.text == 'Reset':
@@ -154,6 +176,7 @@ async def perform_request(session, url, semaphore):
         async with session.post(post_url) as response:
             return await response.json()
 
+# Обработчик шага ввода количества запросов
 @dp.message_handler(state=URLState.number)
 async def process_number(message: types.Message, state: FSMContext):
     if message.text == 'Reset':
@@ -178,7 +201,7 @@ async def process_number(message: types.Message, state: FSMContext):
 
     links = []
 
-    max_concurrent_tasks = 10  # Здесь можно указать количество потоков
+    max_concurrent_tasks = 20  # Ограничение на количество потоков
     semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
     async with aiohttp.ClientSession() as session:
@@ -187,13 +210,14 @@ async def process_number(message: types.Message, state: FSMContext):
         links = [result.get('shortUrl') for result in results if result and result.get('shortUrl')]
 
     file_path = "short_links.txt"
-    with open(file_path, 'w') as f:
+    async with aiofiles.open(file_path, 'w') as f:
         for link in links:
-            f.write(link + '\n')
+            await f.write(link + '\n')
 
     await bot.send_document(message.chat.id, types.InputFile(file_path))
     await state.finish()
 
+# Обработчик активации ключа
 @dp.message_handler()
 async def get_activation_key(message: types.Message):
     if message.from_user.id != admin_id:
@@ -201,24 +225,14 @@ async def get_activation_key(message: types.Message):
             if message.text in [key for key, _ in active_keys.values()]:
                 expiry = asyncio.get_event_loop().time() + 86400
                 active_keys[message.from_user.id] = (message.text, expiry)
-                save_keys()
+                await save_keys_async()
                 await message.reply("Вы активированы и можете использовать бота.", reply_markup=markup_user)
             else:
                 await message.reply("Неверный ключ. Пожалуйста, введите правильный ключ активации.")
 
+# Основная функция для запуска бота
 async def main():
     logging.info("Starting bot...")
-
-    # Запуск простого веб-сервера для поддержки платформы
-    app = web.Application()
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running"))
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.getenv("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-
     try:
         await dp.start_polling()
     except (KeyboardInterrupt, SystemExit):
